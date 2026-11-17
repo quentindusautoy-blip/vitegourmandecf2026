@@ -1,0 +1,48 @@
+VITE & GOURMAND — MISE À JOUR EMAILS + MOT DE PASSE OUBLIÉ (V5)
+===================================================================
+
+IMPORTANT
+- Cette archive reprend les fichiers EXACTS de la branche develop (commit 7df028d), puis ajoute seulement les emails et le parcours de réinitialisation.
+- Ne touche pas à Le Quai Antique ni à MongoDB. Aucun mot de passe n’est dans l’archive.
+- Fais une sauvegarde avant de remplacer les fichiers.
+
+INSTALLATION (local ET alwaysdata)
+1. Dans VS Code : git switch develop ; git switch -c feature/emails-password-reset
+2. Décompresse l’archive et copie app/actions.php, app/mail_notifications.php et public/index.php dans ton projet.
+3. Sur phpMyAdmin LOCAL, sélectionne d’abord vite_gourmand, puis Importe database/2026_11_17_password_reset_tokens.sql.
+4. Sur phpMyAdmin ALWAYSADATA, sélectionne impérativement lequaiantique_vitegourmand (JAMAIS lequaiantique_api), puis Importe le même SQL.
+5. Dans alwaysdata > Web > Sites > Vite & Gourmand, configure ces variables d’environnement :
+   MAIL_FROM=lequaiantique@alwaysdata.net
+   APP_BASE_URL=https://lequaiantique.alwaysdata.net/vite-gourmand/
+   (sans supprimer DB_* ni MONGODB_*).
+6. Par FileZilla, transfère seulement app/actions.php, app/mail_notifications.php, public/index.php dans /home/lequaiantique/www/vite-gourmand/ en gardant leur structure.
+7. Vérifie : https://lequaiantique.alwaysdata.net/vite-gourmand/index.php?page=forgot-password
+
+TESTS CONSEILLÉS (en ligne, avec TES PROPRES adresses de test)
+A. Inscris un nouveau compte de test avec une vraie boîte email qui t’appartient. Vérifie l’email de bienvenue (et le dossier Spam).
+B. Depuis la page Connexion, clique « Mot de passe oublié ? » ; demande un lien, ouvre le message reçu et change le mot de passe.
+C. Vérifie que le lien ne fonctionne plus après usage et que le nouveau mot de passe permet la connexion.
+D. Valide une commande de test : confirmation envoyée ; dans le back-office change le statut : notification envoyée.
+E. Soumets le formulaire Contact avec une adresse de test. Connecte-toi à Roundcube pour vérifier la réception sur la boîte alwaysdata.
+F. Si l'envoi échoue, regarde les logs PHP et les journaux email alwaysdata. Le stockage SQL demeure valable même si un email ne part pas.
+G. Supprime de /public les anciens scripts de diagnostic publiquement accessibles.
+
+SÉCURITÉ
+- L'URL de réinitialisation ne dépend pas du Host HTTP envoyé par le navigateur ; APP_BASE_URL est fixée côté serveur.
+- Seul le hachage SHA-256 du jeton aléatoire (32 octets) est stocké en SQL ; le jeton lui-même n’est transmis que par email.
+- Jeton valable 30 minutes, à usage unique, invalidé après utilisation. L’ancien mot de passe est remplacé par password_hash().
+- Même réponse si l’email demandé existe ou pas, et limitation d’un lien toutes les 5 min par compte.
+- Réponse navigateur neutre. Ne jamais publier la liste des utilisateurs ou des mots de passe.
+- L'utilisation de la fonction mail() indique que le serveur accepte le message, pas que le destinataire l’a reçu.
+
+GIT APRÈS TESTS
+  git add app/actions.php app/mail_notifications.php public/index.php database/2026_11_17_password_reset_tokens.sql
+  git commit -m "Emails transactionnels et réinitialisation de mot de passe"
+  git push -u origin feature/emails-password-reset
+Puis fusionner dans develop après tests. Ne PAS utiliser git add . si des fichiers de diagnostic ou secrets sont présents.
+
+LIMITES IMPORTANTES AVANT PRODUCTION
+- Les CGV/RGPD doivent encore être finalisés, les emails sont une fonctionnalité pédagogique à tester.
+- Il faudra renforcer la protection anti-bruteforce à l’échelle serveur et prévoir une gestion des emails en file d’attente pour un service de production.
+- Réinitialiser le mot de passe ne révoque pas les autres sessions déjà ouvertes. Une révocation globale nécessiterait une mécanique de sessions côté base.
+- Le suivi du retour de matériel existe dans les statuts mais pas encore sous forme de rappel automatisé à échéance.
