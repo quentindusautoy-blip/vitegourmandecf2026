@@ -10,3 +10,19 @@
 .stats-table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
 .stats-table td,.stats-table th { text-align: left; border-bottom: 1px solid #ddd; padding: .6rem; }
 @media(max-width:600px){ .stats-bar-row { grid-template-columns: 1fr; gap: .3rem; }.stats-table{display:block;overflow-x:auto;} }
+
+/* Version ECF — tableau de bord MongoDB + graphiques Chart.js */
+.stats-kpis { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:14px; margin:20px 0 24px; }
+.stats-kpi { background:#f4f7f2; border:1px solid var(--line); border-radius:12px; padding:18px; min-width:0; }
+.stats-kpi span { display:block; font-size:.85rem; color:var(--muted); margin-bottom:7px; }
+.stats-kpi strong { display:block; color:var(--green); font-size:clamp(1.4rem,2.5vw,2rem); line-height:1.2; font-variant-numeric:tabular-nums; }
+.stats-chart-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); align-items:start; gap:18px; margin:20px 0 28px; }
+.stats-chart-card { min-width:0; padding:20px; border:1px solid var(--line); border-radius:12px; background:#fcfaf6; }
+.stats-chart-card h3 { font-size:1.2rem; margin:0 0 5px; }
+.stats-chart-card p { color:var(--muted); font-size:.86rem; margin:0 0 16px; }
+.stats-chart-area { height:290px; width:100%; position:relative; }
+.stats-chart-area canvas { display:block; width:100%!important; height:100%!important; }
+.stats-chart-error { border:1px solid #e3bca6; border-radius:7px; padding:10px 14px; background:#fff7ee; }
+.stats-table-scroll { width:100%; overflow-x:auto; }
+@media(max-width:900px) { .stats-chart-grid { grid-template-columns:1fr; } }
+@media(max-width:600px) { .stats-kpis { grid-template-columns:1fr; } .stats-chart-card { padding:14px; } }
