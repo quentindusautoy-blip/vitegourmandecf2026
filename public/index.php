@@ -4,11 +4,19 @@ require_once dirname(__DIR__) . '/app/bootstrap.php';
 require_once dirname(__DIR__) . '/app/actions.php';
 
 $page=(string)($_GET['page'] ?? 'home');
-$pages=['home','menus','menu','register','login','order','account','staff','contact','legal','terms'];
+$pages=['home','menus','menu','register','login','forgot-password','reset-password','order','account','staff','contact','legal','terms'];
+if ($page === 'reset-password') { header('Referrer-Policy: no-referrer'); header('Cache-Control: no-store'); }
 if (!in_array($page,$pages,true)) { http_response_code(404); $page='not-found'; }
 if ($_SERVER['REQUEST_METHOD']==='POST') {
     try { post_actions(); }
-    catch (InvalidArgumentException|RuntimeException $e) { flash('error',$e->getMessage()); jump(in_array($page,$pages,true)?$page:'home', ['id'=>(int)($_GET['id']??0)]); }
+    catch (InvalidArgumentException|RuntimeException $e) {
+        flash('error',$e->getMessage());
+        if ($page === 'reset-password') {
+            $token = (string)($_POST['token'] ?? '');
+            jump('reset-password', preg_match('/^[a-f0-9]{64}$/D', $token) ? ['token' => $token] : []);
+        }
+        jump(in_array($page,$pages,true)?$page:'home', ['id'=>(int)($_GET['id']??0)]);
+    }
     catch (PDOException $e) { error_log($e->getMessage()); flash('error','Problème technique ou donnée déjà utilisée.'); jump(in_array($page,$pages,true)?$page:'home'); }
 }
 try { $me=current_user(); $hours=db()->query('SELECT * FROM opening_hours ORDER BY day_no')->fetchAll(); }
@@ -78,7 +86,35 @@ $flash=$_SESSION['flash']??null; unset($_SESSION['flash']);
 <?php if($page==='register'): ?><div class="two"><label>Prénom<input name="first_name" maxlength="80" required autocomplete="given-name"></label><label>Nom<input name="last_name" maxlength="80" required autocomplete="family-name"></label></div><label>Téléphone<input name="phone" maxlength="25" required autocomplete="tel"></label><label>Adresse postale<input name="address" maxlength="255" required autocomplete="street-address"></label><?php endif; ?>
 <label>Email<input name="email" type="email" maxlength="190" autocomplete="email" required></label><label>Mot de passe<input name="password" type="password" minlength="<?=$page==='register'?'10':'1'?>" autocomplete="<?=$page==='login'?'current-password':'new-password'?>" required></label>
 <?php if($page==='register'): ?><small>10 caractères minimum, majuscule, minuscule, chiffre et caractère spécial.</small><?php endif; ?>
-<button class="btn full" type="submit"><?=$page==='login'?'Se connecter':'Créer mon compte'?></button></form><p><?=$page==='login'?'Pas encore de compte ?':'Déjà client ?'?> <a href="<?=e(url($page==='login'?'register':'login'))?>"><?=$page==='login'?'S’inscrire':'Se connecter'?></a></p></section></div>
+<button class="btn full" type="submit"><?=$page==='login'?'Se connecter':'Créer mon compte'?></button></form><p><?=$page==='login'?'Pas encore de compte ?':'Déjà client ?'?> <a href="<?=e(url($page==='login'?'register':'login'))?>"><?=$page==='login'?'S’inscrire':'Se connecter'?></a></p>
+<?php if ($page==='login'): ?><p><a href="<?=e(url('forgot-password'))?>">Mot de passe oublié ?</a></p><?php endif; ?>
+</section></div>
+<?php elseif($page==='forgot-password'): ?>
+<div class="auth-wrapper"><section class="form-card">
+<p class="eyebrow">Sécurité du compte</p><h1>Mot de passe oublié</h1>
+<p>Indiquez l’adresse email de votre compte. Si elle existe, vous recevrez un lien utilisable une seule fois pendant 30 minutes.</p>
+<form method="post" action="<?=e(url('forgot-password'))?>">
+<?=csrf_input()?><input type="hidden" name="action" value="request_password_reset">
+<label>Votre email<input type="email" name="email" maxlength="190" autocomplete="email" required></label>
+<button class="btn full" type="submit">Recevoir le lien de réinitialisation</button>
+</form><p><a href="<?=e(url('login'))?>">Revenir à la connexion</a></p>
+</section></div>
+<?php elseif($page==='reset-password'): ?>
+<?php $resetToken = (string)($_GET['token'] ?? ''); $tokenIsValid = vg_reset_token_is_valid($resetToken); ?>
+<div class="auth-wrapper"><section class="form-card">
+<p class="eyebrow">Sécurité du compte</p><h1>Choisir un nouveau mot de passe</h1>
+<?php if (!$tokenIsValid): ?>
+<p>Ce lien est invalide, expiré ou déjà utilisé.</p><p><a href="<?=e(url('forgot-password'))?>">Demander un nouveau lien</a></p>
+<?php else: ?>
+<form method="post" action="<?=e(url('reset-password',['token'=>$resetToken]))?>">
+<?=csrf_input()?><input type="hidden" name="action" value="reset_password"><input type="hidden" name="token" value="<?=e($resetToken)?>">
+<label>Nouveau mot de passe<input type="password" name="password" minlength="10" autocomplete="new-password" required></label>
+<label>Confirmer le mot de passe<input type="password" name="password_confirm" minlength="10" autocomplete="new-password" required></label>
+<small>10 caractères minimum, une majuscule, une minuscule, un chiffre et un caractère spécial.</small>
+<button class="btn full" type="submit">Enregistrer le nouveau mot de passe</button>
+</form>
+<?php endif; ?>
+</section></div>
 <?php elseif($page==='order'): ?>
 <?php $u=require_login();$m=menu_by_id((int)($_GET['id']??0)); if(!$m):?><h1>Menu indisponible</h1><?php else: ?>
 <section class="page-heading"><h1>Commander <?=e($m['title'])?></h1><p>Le tarif final sera vérifié par le serveur au moment de la commande.</p></section><div class="auth-wrapper wide"><section class="form-card"><form method="post" action="<?=e(url('order',['id'=>$m['id']]))?>"><?=csrf_input()?><input type="hidden" name="action" value="place_order"><input type="hidden" name="menu_id" value="<?=(int)$m['id']?>">
@@ -237,7 +273,7 @@ if(!$staffOrders):?><p>Aucune commande trouvée.</p><?php endif;?>
 
 <?php endif; ?>
 <?php elseif($page==='contact'): ?>
-<section class="page-heading"><h1>Nous contacter</h1><p>Une question sur nos menus ou une prestation ?</p></section><div class="auth-wrapper wide"><form method="post" action="<?=e(url('contact'))?>" class="form-card"><?=csrf_input()?><input type="hidden" name="action" value="contact"><label>Objet<input name="subject" required maxlength="160"></label><label>Votre email<input name="email" type="email" required maxlength="190"></label><label>Votre message<textarea name="body" required maxlength="5000" rows="6"></textarea></label><button class="btn" type="submit">Enregistrer le message</button><small>Envoi d’email à l’entreprise non connecté dans cette version.</small></form></div>
+<section class="page-heading"><h1>Nous contacter</h1><p>Une question sur nos menus ou une prestation ?</p></section><div class="auth-wrapper wide"><form method="post" action="<?=e(url('contact'))?>" class="form-card"><?=csrf_input()?><input type="hidden" name="action" value="contact"><label>Objet<input name="subject" required maxlength="160"></label><label>Votre email<input name="email" type="email" required maxlength="190"></label><label>Votre message<textarea name="body" required maxlength="5000" rows="6"></textarea></label><button class="btn" type="submit">Envoyer le message</button><small>Votre demande est conservée dans notre base et transmise à l’équipe par email.</small></form></div>
 <?php elseif($page==='legal'): ?><section class="page-heading"><h1>Mentions légales</h1></section><p><strong>Document à compléter avant la mise en ligne.</strong> Identité, coordonnées et hébergeur doivent être vérifiés auprès de l’entreprise fictive.</p>
 <?php elseif($page==='terms'): ?><section class="page-heading"><h1>Conditions générales de vente</h1></section><p><strong>Projet pédagogique — conditions juridiques à finaliser avant mise en production.</strong></p><p>La commande est soumise au minimum de convives et aux délais indiqués sur la fiche du menu. Hors Bordeaux, la livraison est facturée 5 € plus 0,59 € par kilomètre parcouru. Une remise de 10 % s'applique dès 5 convives supplémentaires. En cas de prêt de matériel, les conditions de restitution et les éventuels frais de 600 € après 10 jours ouvrés devront être confirmés et intégrés aux CGV définitives.</p>
 <?php else: ?><h1>Page introuvable</h1><?php endif; ?>
