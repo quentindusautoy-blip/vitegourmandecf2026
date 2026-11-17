@@ -28,6 +28,10 @@ $flash=$_SESSION['flash']??null; unset($_SESSION['flash']);
 <title><?= e(ucfirst($page)) ?> · Vite & Gourmand</title>
 <meta name="description" content="Vite & Gourmand, traiteur pour vos événements à Bordeaux.">
 <link rel="stylesheet" href="assets/style.css"><script defer src="assets/app.js"></script>
+<?php if ($page === 'staff' && ($me['role'] ?? '') === 'admin'): ?>
+<script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.8/dist/chart.umd.min.js"></script>
+<script defer src="assets/stats-charts.js"></script>
+<?php endif; ?>
 </head><body>
 <a href="#contenu" class="skip">Aller au contenu</a>
 <header class="site-header"><div class="container header-inner">
@@ -112,6 +116,79 @@ $flash=$_SESSION['flash']??null; unset($_SESSION['flash']);
 <?php elseif($page==='staff'): ?>
 <?php $u=require_staff(); ?>
 <section class="page-heading"><p class="eyebrow">Back-office</p><h1>Gestion des commandes et du catalogue</h1><p>Rôle connecté : <?=e($u['role'])?></p></section>
+<?php if($u['role']==='admin'): ?>
+<section class="order-card" aria-labelledby="mongo-title">
+<h2 id="mongo-title">Statistiques des commandes (MongoDB)</h2>
+<p>Les chiffres ci-dessous sont lus dans <code>vite_gourmand_ecf.order_stats</code>, et non dans MariaDB. Les commandes annulées sont exclues.</p>
+<form method="post" action="<?=e(url('staff'))?>" class="inline">
+<?=csrf_input()?>
+<input type="hidden" name="action" value="sync_stats">
+<button class="btn ghost" type="submit">Synchroniser les commandes depuis MariaDB</button>
+</form>
+<?php
+$statsFrom=stats_date_filter('from'); $statsTo=stats_date_filter('to');
+$statsMenu=filter_var($_GET['stats_menu'] ?? null, FILTER_VALIDATE_INT);
+$statsMenu=($statsMenu !== false && $statsMenu !== null && $statsMenu > 0) ? $statsMenu : null;
+$statsError=null; $stats=null;
+try {
+    $stats=stats_report($statsFrom,$statsTo,$statsMenu);
+} catch (Throwable $ex) {
+    error_log('Vite & Gourmand : lecture statistiques Atlas impossible');
+    $statsError='Statistiques MongoDB indisponibles : vérifiez la configuration Atlas, puis synchronisez.';
+}
+?>
+<form method="get" action="index.php" class="filter-panel">
+<input type="hidden" name="page" value="staff">
+<label>Commandes depuis le <input type="date" name="from" value="<?=e($statsFrom ?? '')?>"></label>
+<label>Jusqu’au <input type="date" name="to" value="<?=e($statsTo ?? '')?>"></label>
+<label>Menu<select name="stats_menu"><option value="">Tous les menus</option><?php foreach(db()->query('SELECT id,title FROM menus ORDER BY title') as $statsMenuOption): ?><option value="<?=(int)$statsMenuOption['id']?>" <?=$statsMenu===(int)$statsMenuOption['id']?'selected':''?>><?=e($statsMenuOption['title'])?></option><?php endforeach; ?></select></label>
+<button class="btn" type="submit">Filtrer les statistiques</button>
+<a href="<?=e(url('staff'))?>">Effacer les dates</a>
+</form>
+<?php if($statsError): ?>
+<p role="alert"><?=e($statsError)?></p>
+<?php elseif($stats): ?>
+<div class="stats-kpis" aria-label="Indicateurs des commandes">
+  <div class="stats-kpi"><span>Commandes non annulées</span><strong><?=(int)$stats['count']?></strong></div>
+  <div class="stats-kpi"><span>CA réalisé (livré / terminé)</span><strong><?=euro((int)$stats['realized_cents'])?></strong></div>
+  <div class="stats-kpi"><span>Commandes en cours</span><strong><?=euro((int)$stats['potential_cents'])?></strong></div>
+</div>
+<?php if(!$stats['groups']): ?>
+<p>Aucune statistique pour cette période. Cliquez sur « Synchroniser » si des commandes existent déjà.</p>
+<?php else: ?>
+<?php
+// Préparer uniquement des agrégats MongoDB (pas de données personnelles des clients).
+$chartData = ['labels' => [], 'counts' => [], 'realized' => [], 'pending' => []];
+foreach ($stats['groups'] as $group) {
+    $chartData['labels'][] = (string)$group['title'];
+    $chartData['counts'][] = (int)$group['count'];
+    $chartData['realized'][] = round((int)$group['realized_cents'] / 100, 2);
+    $chartData['pending'][] = round((int)$group['potential_cents'] / 100, 2);
+}
+?>
+<div class="stats-chart-grid">
+  <section class="stats-chart-card" aria-labelledby="stats-orders-heading">
+    <h3 id="stats-orders-heading">Nombre de commandes par menu</h3>
+    <p>Comparaison des commandes enregistrées, hors annulations.</p>
+    <div class="stats-chart-area"><canvas id="ordersByMenuChart" role="img" aria-label="Histogramme horizontal du nombre de commandes par menu. Données détaillées dans le tableau ci-dessous."></canvas></div>
+  </section>
+  <section class="stats-chart-card" aria-labelledby="stats-revenue-heading">
+    <h3 id="stats-revenue-heading">Montants par menu</h3>
+    <p>Commandes réalisées et montants encore en cours, en euros.</p>
+    <div class="stats-chart-area"><canvas id="revenueByMenuChart" role="img" aria-label="Histogramme horizontal du chiffre d’affaires réalisé et des montants des commandes en cours par menu. Données détaillées dans le tableau ci-dessous."></canvas></div>
+  </section>
+</div>
+<p class="stats-chart-error" id="stats-chart-error" role="status" hidden>Les graphiques n'ont pas pu être chargés. Les chiffres restent disponibles dans le tableau ci-dessous.</p>
+<script type="application/json" id="vg-stats-chart-data"><?=json_encode($chartData, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_INVALID_UTF8_SUBSTITUTE | JSON_UNESCAPED_UNICODE)?></script>
+<h3>Détail des statistiques par menu</h3>
+<div class="stats-table-scroll">
+<table class="stats-table"><thead><tr><th scope="col">Menu</th><th scope="col">Commandes</th><th scope="col">CA réalisé</th><th scope="col">Commandes en cours</th></tr></thead><tbody>
+<?php foreach($stats['groups'] as $group): ?><tr><th scope="row"><?=e($group['title'])?></th><td><?=(int)$group['count']?></td><td><?=euro((int)$group['realized_cents'])?></td><td><?=euro((int)$group['potential_cents'])?></td></tr><?php endforeach; ?>
+</tbody></table>
+</div>
+<?php endif; endif; ?>
+</section>
+<?php endif; ?>
 <h2>Commandes</h2>
 <form method="get" class="filter-panel staff-filter" action="index.php"><input type="hidden" name="page" value="staff">
 <label>Statut<select name="status"><option value="">Tous</option><?php $statusFilter=(string)($_GET['status']??'');foreach(['pending','accepted','preparing','shipping','delivered','awaiting_material','completed','cancelled'] as $s):?><option value="<?=e($s)?>" <?=$statusFilter===$s?'selected':''?>><?=e($s)?></option><?php endforeach;?></select></label>
@@ -157,7 +234,7 @@ if(!$staffOrders):?><p>Aucune commande trouvée.</p><?php endif;?>
 <?php if($u['role']==='admin'):?>
 <h2>Créer un employé</h2><form method="post" action="<?=e(url('staff'))?>" class="form-card compact"><?=csrf_input()?><input type="hidden" name="action" value="create_employee"><div class="two"><label>Prénom<input name="first_name" required></label><label>Nom<input name="last_name" required></label></div><label>Email<input type="email" name="email" required></label><label>Téléphone<input name="phone" required></label><label>Mot de passe fort<input type="password" name="password" required minlength="10"></label><button class="btn">Créer un employé</button></form>
 <h2>Désactiver un employé</h2><?php foreach(db()->query('SELECT id,email FROM users WHERE role="employee" AND active=1') as $emp):?><form method="post" action="<?=e(url('staff'))?>" class="inline"><?=csrf_input()?><input type="hidden" name="action" value="disable_employee"><input type="hidden" name="employee_id" value="<?=(int)$emp['id']?>"><span><?=e($emp['email'])?></span> <button class="btn ghost">Désactiver</button></form><?php endforeach;?>
-<div class="notice">Statistiques MongoDB et graphiques : non intégrés à cette version. L'énoncé impose une base non relationnelle réelle.</div>
+
 <?php endif; ?>
 <?php elseif($page==='contact'): ?>
 <section class="page-heading"><h1>Nous contacter</h1><p>Une question sur nos menus ou une prestation ?</p></section><div class="auth-wrapper wide"><form method="post" action="<?=e(url('contact'))?>" class="form-card"><?=csrf_input()?><input type="hidden" name="action" value="contact"><label>Objet<input name="subject" required maxlength="160"></label><label>Votre email<input name="email" type="email" required maxlength="190"></label><label>Votre message<textarea name="body" required maxlength="5000" rows="6"></textarea></label><button class="btn" type="submit">Enregistrer le message</button><small>Envoi d’email à l’entreprise non connecté dans cette version.</small></form></div>
