@@ -3,6 +3,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/bootstrap.php';
 require_once __DIR__ . '/extra_actions.php';
 require_once __DIR__ . '/mongo_stats.php';
+require_once __DIR__ . '/mail_notifications.php';
 
 function post_actions(): void {
     if ($_SERVER['REQUEST_METHOD'] !== 'POST') return;
@@ -31,7 +32,10 @@ function post_actions(): void {
             try { $q->execute([$first,$last,$email,$phone,$address,password_hash($password,PASSWORD_DEFAULT)]); }
             catch (PDOException $e) { if ($e->getCode()==='23000') throw new InvalidArgumentException('Cette adresse email est déjà utilisée.'); throw $e; }
             session_regenerate_id(true); $_SESSION['uid']=(int)db()->lastInsertId();
-            flash('success','Compte créé. Vous êtes connecté.'); jump('account');
+            $sent = vg_mail_welcome(['first_name' => $first, 'email' => $email]);
+            flash($sent ? 'success' : 'error', $sent
+                ? 'Compte créé. Un email de bienvenue a été envoyé.'
+                : 'Compte créé, mais l’email de bienvenue n’a pas pu être envoyé.'); jump('account');
         case 'login':
             $email=required('email',190); $pass=(string)($_POST['password']??'');
             $q=db()->prepare('SELECT id,password_hash,active FROM users WHERE email=?'); $q->execute([$email]); $u=$q->fetch();
@@ -46,9 +50,33 @@ function post_actions(): void {
         case 'contact':
             $subject=required('subject',160); $mail=filter_var(required('email',190),FILTER_VALIDATE_EMAIL); $body=required('body',5000);
             if (!$mail) throw new InvalidArgumentException('Adresse email incorrecte.');
+            if (!empty($_SESSION['contact_last']) && time() - (int)$_SESSION['contact_last'] < 60) {
+                throw new InvalidArgumentException('Merci d’attendre une minute avant d’envoyer un autre message.');
+            }
             $q=db()->prepare('INSERT INTO contact_messages(subject,email,body) VALUES (?,?,?)');
             $q->execute([$subject,$mail,$body]);
-            flash('success','Message enregistré. L’envoi automatique par email sera ajouté dans une prochaine étape.'); jump('contact');
+            $_SESSION['contact_last'] = time();
+            $sent = vg_mail_contact((string)$mail, $subject, $body);
+            flash($sent ? 'success' : 'error', $sent
+                ? 'Votre demande a été enregistrée et transmise à notre équipe.'
+                : 'Votre demande a été enregistrée, mais l’email n’a pas pu être transmis.');
+            jump('contact');
+        case 'request_password_reset':
+            $email = filter_var(required('email',190), FILTER_VALIDATE_EMAIL);
+            if (!$email) throw new InvalidArgumentException('Saisissez une adresse email valide.');
+            vg_request_password_reset((string)$email);
+            flash('success', 'Si cette adresse correspond à un compte actif, un lien de réinitialisation a été envoyé. Pensez à vérifier les spams.');
+            jump('forgot-password');
+        case 'reset_password':
+            $token = (string)($_POST['token'] ?? '');
+            $password = (string)($_POST['password'] ?? '');
+            $confirm = (string)($_POST['password_confirm'] ?? '');
+            if ($password !== $confirm) throw new InvalidArgumentException('Les mots de passe ne correspondent pas.');
+            vg_change_password_with_token($token, $password);
+            unset($_SESSION['uid']);
+            session_regenerate_id(true);
+            flash('success','Mot de passe modifié. Vous pouvez vous connecter.');
+            jump('login');
         case 'place_order':
             $u=require_login(); $menuId=(int)($_POST['menu_id']??0); $people=(int)($_POST['people']??0);
             $date=required('event_date',10); $time=required('delivery_time',5);
@@ -88,7 +116,11 @@ function post_actions(): void {
                 $pdo->commit();
             } catch (Throwable $e) { $pdo->rollBack(); throw $e; }
             stats_try_sync_one($orderId);
-            flash('success','Commande n°'.$orderId.' enregistrée. Montant : '.euro($total).' (livraison estimative si hors Bordeaux).');
+            $emailSent = vg_mail_order_confirmation($orderId);
+            flash($emailSent ? 'success' : 'error',
+                'Commande n°'.$orderId.' enregistrée. Montant : '.euro($total).
+                ' (livraison estimative si hors Bordeaux). '.
+                ($emailSent ? 'Email de confirmation envoyé.' : 'L’email de confirmation n’a pas pu être envoyé.'));
             jump('account');
         case 'cancel_order':
             $u=require_login(); $id=(int)($_POST['order_id']??0);
@@ -132,7 +164,11 @@ function post_actions(): void {
                 $pdo->commit();
             } catch (Throwable $e) { $pdo->rollBack(); throw $e; }
             stats_try_sync_one($id);
-            flash('success','Statut mis à jour.'); jump('staff');
+            $sent = vg_mail_order_status($id, $target);
+            flash($sent ? 'success' : 'error', $sent
+                ? 'Statut mis à jour. Notification client envoyée.'
+                : 'Statut mis à jour, mais la notification client n’a pas pu être envoyée.');
+            jump('staff');
         case 'edit_menu':
             require_staff(); $id=(int)($_POST['menu_id']??0);
             $stock=filter_var($_POST['stock']??null,FILTER_VALIDATE_INT);
@@ -148,9 +184,13 @@ function post_actions(): void {
             $u=require_staff(); if ($u['role']!=='admin') { http_response_code(403); exit('Accès interdit.'); }
             $mail=filter_var(required('email',190),FILTER_VALIDATE_EMAIL); $pass=(string)($_POST['password']??'');
             if (!$mail || !password_valid($pass)) throw new InvalidArgumentException('Email ou mot de passe non conforme.');
+            $first = required('first_name',80);
             db()->prepare('INSERT INTO users(first_name,last_name,email,phone,address,password_hash,role) VALUES (?,?,?,?,?,?,"employee")')
-                ->execute([required('first_name',80),required('last_name',80),$mail,required('phone',25),'Adresse à compléter',password_hash($pass,PASSWORD_DEFAULT)]);
-            flash('success','Compte employé créé (transmettez le mot de passe par un canal sûr).'); jump('staff');
+                ->execute([$first,required('last_name',80),$mail,required('phone',25),'Adresse à compléter',password_hash($pass,PASSWORD_DEFAULT)]);
+            $sent = vg_mail_employee_created((string)$mail, $first);
+            flash($sent ? 'success' : 'error', $sent
+                ? 'Compte employé créé. Un email d’information sans mot de passe a été envoyé.'
+                : 'Compte employé créé, mais l’email n’a pas pu être envoyé.'); jump('staff');
         case 'disable_employee':
             $u=require_staff(); if ($u['role']!=='admin') { http_response_code(403); exit('Accès interdit.'); }
             db()->prepare('UPDATE users SET active=0 WHERE id=? AND role="employee"')->execute([(int)($_POST['employee_id']??0)]);
