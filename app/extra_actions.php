@@ -79,6 +79,7 @@ function extra_actions(string $action): void {
                 $pdo->rollBack();
                 throw $e;
             }
+            stats_try_sync_one((int)$orderId);
             flash('success', 'Commande modifiée. Nouveau total : ' . euro($total) . '.');
             jump('account');
 

@@ -2,6 +2,7 @@
 declare(strict_types=1);
 require_once __DIR__ . '/bootstrap.php';
 require_once __DIR__ . '/extra_actions.php';
+require_once __DIR__ . '/mongo_stats.php';
 
 function post_actions(): void {
     if ($_SERVER['REQUEST_METHOD'] !== 'POST') return;
@@ -9,6 +10,14 @@ function post_actions(): void {
     $action = (string)($_POST['action'] ?? '');
     if (in_array($action, ['update_profile','update_order','save_hours','save_menu','save_dish','link_dish','unlink_dish'], true)) {
         extra_actions($action);
+    }
+    if ($action === 'sync_stats') {
+        $user = require_staff();
+        if ($user['role'] !== 'admin') { http_response_code(403); exit('Accès interdit.'); }
+        try { $n = stats_sync_all(); }
+        catch (Throwable $error) { error_log('Vite & Gourmand : sync MongoDB impossible'); throw new RuntimeException('Synchronisation indisponible. Vérifiez la connexion MongoDB Atlas.'); }
+        flash('success', $n . ' commande(s) synchronisée(s) dans MongoDB.');
+        jump('staff');
     }
     switch ($action) {
         case 'register':
@@ -78,6 +87,7 @@ function post_actions(): void {
                 $pdo->prepare('UPDATE menus SET stock=stock-1 WHERE id=?')->execute([$menuId]);
                 $pdo->commit();
             } catch (Throwable $e) { $pdo->rollBack(); throw $e; }
+            stats_try_sync_one($orderId);
             flash('success','Commande n°'.$orderId.' enregistrée. Montant : '.euro($total).' (livraison estimative si hors Bordeaux).');
             jump('account');
         case 'cancel_order':
@@ -92,6 +102,7 @@ function post_actions(): void {
                 $pdo->prepare('INSERT INTO order_history(order_id,status,changed_by) VALUES (?,"cancelled",?)')->execute([$id,$u['id']]);
                 $pdo->commit();
             } catch (Throwable $e) { $pdo->rollBack(); throw $e; }
+            stats_try_sync_one($id);
             flash('success','Commande annulée.'); jump('account');
         case 'review':
             $u=require_login(); $id=(int)($_POST['order_id']??0); $rating=(int)($_POST['rating']??0); $comment=required('comment',2000);
@@ -120,6 +131,7 @@ function post_actions(): void {
                 $pdo->prepare('INSERT INTO order_history(order_id,status,changed_by) VALUES (?,?,?)')->execute([$id,$target,$u['id']]);
                 $pdo->commit();
             } catch (Throwable $e) { $pdo->rollBack(); throw $e; }
+            stats_try_sync_one($id);
             flash('success','Statut mis à jour.'); jump('staff');
         case 'edit_menu':
             require_staff(); $id=(int)($_POST['menu_id']??0);
