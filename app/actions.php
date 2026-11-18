@@ -4,6 +4,7 @@ require_once __DIR__ . '/bootstrap.php';
 require_once __DIR__ . '/extra_actions.php';
 require_once __DIR__ . '/mongo_stats.php';
 require_once __DIR__ . '/mail_notifications.php';
+require_once __DIR__ . '/login_guard.php';
 
 function post_actions(): void {
     if ($_SERVER['REQUEST_METHOD'] !== 'POST') return;
@@ -38,10 +39,15 @@ function post_actions(): void {
                 : 'Compte créé, mais l’email de bienvenue n’a pas pu être envoyé.'); jump('account');
         case 'login':
             $email=required('email',190); $pass=(string)($_POST['password']??'');
+            if (vg_login_is_blocked($email)) {
+                throw new InvalidArgumentException('Trop de tentatives. Veuillez réessayer dans 15 minutes.');
+            }
             $q=db()->prepare('SELECT id,password_hash,active FROM users WHERE email=?'); $q->execute([$email]); $u=$q->fetch();
             if (!$u || !$u['active'] || !password_verify($pass,$u['password_hash'])) {
+                vg_login_record_failure($email);
                 throw new InvalidArgumentException('Identifiants incorrects.');
             }
+            vg_login_clear_failures($email);
             session_regenerate_id(true); $_SESSION['uid']=(int)$u['id'];
             flash('success','Connexion réussie.'); jump('account');
         case 'logout':
