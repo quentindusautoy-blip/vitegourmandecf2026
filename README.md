@@ -313,7 +313,6 @@ La fonction `mail()` de PHP est utilisée pour les emails sur alwaysdata. La con
 - [ ] Terminer les médias/galeries de menus et certaines opérations de gestion (notamment la suppression si exigée).
 - [ ] Écrire et exécuter des tests automatisés représentatifs.
 - [ ] Vérifier la délivrabilité des emails et compléter les notifications restant à couvrir par l'énoncé.
-- [ ] Mettre à jour les documents `docs/PLAN.md` et `docs/ARCHITECTURE.md`, qui décrivent encore en partie des versions antérieures.
 
 Ces points ouverts doivent aussi apparaître dans le tableau **GitHub Projects** (statut « Todo » ou « In progress »), et non dans « Done ».
 
@@ -345,7 +344,7 @@ Le fichier `.gitignore` exclut notamment `.env`, `vendor/`, `node_modules/` et l
 ## Documentation complémentaire
 
 - [Plan de réalisation](docs/PLAN.md) — document historique à actualiser.
-- [Architecture et diagrammes](docs/ARCHITECTURE.md) — diagrammes de travail ; certaines mentions sont antérieures à MongoDB et aux emails.
+- [Modélisation des données et diagrammes UML](docs/Diagrammes_MCD_UML.pdf).
 - [Architecture MongoDB et statistiques](docs/MONGODB_STATS.md).
 
 ---
